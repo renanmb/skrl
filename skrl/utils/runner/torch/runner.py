@@ -39,6 +39,12 @@ class Runner:
         """Trainer instance"""
         return self._trainer
 
+    # Getter attribute added for the models
+    @property
+    def model(self) -> Model:
+        """Model instance"""
+        return self._models
+
     @property
     def agent(self) -> Agent:
         """Agent instance"""
