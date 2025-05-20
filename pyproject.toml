@@ -1,5 +1,5 @@
 [project]
-name = "skrl"
+name = "skrl-test"
 version = "1.4.3"
 description = "Modular and flexible library for reinforcement learning on PyTorch and JAX"
 readme = "README.md"
