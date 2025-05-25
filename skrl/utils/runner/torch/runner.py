@@ -12,6 +12,15 @@ from skrl.resources.schedulers.torch import KLAdaptiveLR  # noqa
 from skrl.trainers.torch import Trainer
 from skrl.utils import set_seed
 
+# Adding the Normalizers
+from skrl.resources.normalizers.torch import EmpiricalNormalization
+import torch
+from skrl.utils.spaces.torch import (
+    compute_space_size,
+    flatten_tensorized_space,
+    sample_space,
+    unflatten_tensorized_space,
+)
 
 class Runner:
     def __init__(self, env: Union[Wrapper, MultiAgentEnvWrapper], cfg: Mapping[str, Any]) -> None:
@@ -33,12 +42,33 @@ class Runner:
         self._models = self._generate_models(self._env, copy.deepcopy(self._cfg))
         self._agent = self._generate_agent(self._env, copy.deepcopy(self._cfg), self._models)
         self._trainer = self._generate_trainer(self._env, copy.deepcopy(self._cfg), self._agent)
+        
+        # region NORMALIZER
+        # TODO find a way to resolve the dimensions of observations
+        # obs, extras = self._env.get_observations()
+        # num_obs = obs.shape[1]
+        obs = self._get_observations(self._env, copy.deepcopy(self._cfg))
+        # print(obs)
+        num_obs = obs['agent']['policy']
+        # print(num_obs)
+        # TODO Need to double check if this is a good implementation of a way to get the OBS and the normalization
+        self.empirical_normalization = self._cfg["empirical_normalization"]
+        if self.empirical_normalization:
+            self.obs_normalizer = EmpiricalNormalization(shape=[num_obs], until=1.0e8).to(env.device)
+        else:
+            self.obs_normalizer = torch.nn.Identity().to(env.device)  # no normalization
 
     @property
     def trainer(self) -> Trainer:
         """Trainer instance"""
         return self._trainer
-
+    
+    # Getter attribute added for the models
+    @property
+    def model(self) -> Model:
+        """Model instance"""
+        return self._models
+    
     @property
     def agent(self) -> Agent:
         """Agent instance"""
@@ -189,6 +219,105 @@ class Runner:
 
         return update_dict(copy.deepcopy(cfg))
 
+    # region NUM_OBS
+    # TODO find a way to resolve the dimensions of observations
+    # The idea is to make something similar to the method _generate_models because the models depend on the Observations dimensions
+    # There is also tooling built for the Class Model 
+    def _get_observations(
+        self, env: Union[Wrapper, MultiAgentEnvWrapper], cfg: Mapping[str, Any]
+    ) -> Mapping[str, Mapping[str, Model]]:
+        """Resolve the dimensions of observation_spaces depending on the Generated model instances according to the environment specification and the given config
+        :param env: Wrapped environment
+        :param cfg: A configuration dictionary
+
+        I borrowed the 
+        - ``num_observations`` (int): Number of elements in the observation/state space
+        
+        :return: num_observations instances
+        """
+        multi_agent = isinstance(env, MultiAgentEnvWrapper)
+        device = env.device
+        possible_agents = env.possible_agents if multi_agent else ["agent"]
+        state_spaces = env.state_spaces if multi_agent else {"agent": env.state_space}
+        observation_spaces = env.observation_spaces if multi_agent else {"agent": env.observation_space}
+        agent_class = cfg.get("agent", {}).get("class", "").lower()
+
+        # instantiate models
+        models = {}
+        num_observations = {}
+        for agent_id in possible_agents:
+            _cfg = copy.deepcopy(cfg)
+            models[agent_id] = {}
+            num_observations[agent_id] = {}
+            models_cfg = _cfg.get("models")
+            if not models_cfg:
+                raise ValueError("No 'models' are defined in cfg")
+            # get separate (non-shared) configuration and remove 'separate' key
+            try:
+                separate = models_cfg["separate"]
+                del models_cfg["separate"]
+            except KeyError:
+                separate = True
+                logger.warning("No 'separate' field defined in 'models' cfg. Defining it as True by default")
+            # non-shared models
+            if separate:
+                for role in models_cfg:
+                    # get instantiator function and remove 'class' key
+                    model_class = models_cfg[role].get("class")
+                    if not model_class:
+                        raise ValueError(f"No 'class' field defined in 'models:{role}' cfg")
+                    del models_cfg[role]["class"]
+                    model_class = self._component(model_class)
+                    # get specific spaces according to agent/model cfg
+                    observation_space = observation_spaces[agent_id]
+                    if agent_class == "mappo" and role == "value":
+                        observation_space = state_spaces[agent_id]
+                    if agent_class == "amp" and role == "discriminator":
+                        try:
+                            observation_space = env.amp_observation_space
+                        except Exception as e:
+                            logger.warning(
+                                "Unable to get AMP space via 'env.amp_observation_space'. Using 'env.observation_space' instead"
+                            )
+                    # print observation_space 
+                    print("==================================================")
+                    print(f"Observation for Model (role): {role}")
+                    print("==================================================\n")
+                    print(observation_space) # Box(-inf, inf, (4,), float32)
+                    print("--------------------------------------------------")
+                    # instantiate observations
+                    num_observations[agent_id][role] = None if observation_space is None else compute_space_size(observation_space)
+            # shared models
+            else:
+                roles = list(models_cfg.keys())
+                if len(roles) != 2:
+                    raise ValueError(
+                        "Runner currently only supports shared models, made up of exactly two models. "
+                        "Set 'separate' field to True to create non-shared models for the given cfg"
+                    )
+                # get shared model structure and parameters
+                structure = []
+                parameters = []
+                for role in roles:
+                    # get instantiator function and remove 'class' key
+                    model_structure = models_cfg[role].get("class")
+                    if not model_structure:
+                        raise ValueError(f"No 'class' field defined in 'models:{role}' cfg")
+                    del models_cfg[role]["class"]
+                    structure.append(model_structure)
+                    parameters.append(self._process_cfg(models_cfg[role]))
+                model_class = self._component("Shared")
+                observation_space=observation_spaces[agent_id]
+                # print observations for shared models
+                print("==================================================")
+                print(f"Observations for Agent_id {agent_id} Shared model (roles): {roles}")
+                print("==================================================\n")
+                print(observation_space) # Box(-inf, inf, (4,), float32)
+                print("--------------------------------------------------")
+                # instantiate observations
+                num_observations[agent_id][roles[0]] = None if observation_space is None else compute_space_size(observation_space)
+        return num_observations
+    # end region NUM_OBS
     def _generate_models(
         self, env: Union[Wrapper, MultiAgentEnvWrapper], cfg: Mapping[str, Any]
     ) -> Mapping[str, Mapping[str, Model]]:

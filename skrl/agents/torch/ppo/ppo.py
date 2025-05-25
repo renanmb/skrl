@@ -111,6 +111,8 @@ class PPO(Agent):
             device=device,
             cfg=_cfg,
         )
+        # RNN specifications
+        self._rnn = False  # flag to indicate whether RNN is available
 
         # models
         self.policy = self.models.get("policy", None)
