@@ -47,16 +47,21 @@ class Runner:
         # TODO find a way to resolve the dimensions of observations
         # obs, extras = self._env.get_observations()
         # num_obs = obs.shape[1]
+
+        # Should return a dictionary with the observations
         obs = self._get_observations(self._env, copy.deepcopy(self._cfg))
-        # print(obs)
-        num_obs = obs['agent']['policy']
-        # print(num_obs)
-        # TODO Need to double check if this is a good implementation of a way to get the OBS and the normalization
-        self.empirical_normalization = self._cfg["empirical_normalization"]
-        if self.empirical_normalization:
-            self.obs_normalizer = EmpiricalNormalization(shape=[num_obs], until=1.0e8).to(env.device)
-        else:
-            self.obs_normalizer = torch.nn.Identity().to(env.device)  # no normalization
+        # Gonna return the dictionary with the obs_normalizer which is needed for the Exporter in IsaacLab
+        self.obs_normalizer = self._normalizer(self._env, copy.deepcopy(self._cfg), obs)
+        
+        # # print(obs)
+        # num_obs = obs['agent']['policy']
+        # # print(num_obs)
+        # # TODO Need to double check if this is a good implementation of a way to get the OBS and the normalization
+        # self.empirical_normalization = self._cfg["empirical_normalization"]
+        # if self.empirical_normalization:
+        #     self.obs_normalizer = EmpiricalNormalization(shape=[num_obs], until=1.0e8).to(env.device)
+        # else:
+        #     self.obs_normalizer = torch.nn.Identity().to(env.device)  # no normalization
 
     @property
     def trainer(self) -> Trainer:
@@ -219,6 +224,90 @@ class Runner:
 
         return update_dict(copy.deepcopy(cfg))
 
+    # region normalizer
+    def _normalizer(
+        self, env: Union[Wrapper, MultiAgentEnvWrapper], cfg: Mapping[str, Any], obs: Mapping[str, Any]
+        ) -> Mapping[str, Mapping[str, Model]]:
+        """
+        calling the normalizer accordingly to the type of env and model (single or multi-agent and so on)
+        """
+        multi_agent = isinstance(env, MultiAgentEnvWrapper)
+        device = env.device
+        possible_agents = env.possible_agents if multi_agent else ["agent"]
+        agent_class = cfg.get("agent", {}).get("class", "").lower()
+
+        # observations should be for a single AGENT something like obs['agent']['policy'] 
+        # For multi-agent it should be several things like obs['cart']['policy'], obs['pendulum']['policy'] ....
+        # observations[agent_id][role]
+        observations = obs
+        self.empirical_normalization = self._cfg["empirical_normalization"]
+        # print(obs)
+        # num_obs = obs['agent']['policy']
+
+        obs_normalizer = {}
+        for agent_id in possible_agents:
+            _cfg = copy.deepcopy(cfg)
+            obs_normalizer[agent_id] = {}
+            models_cfg = _cfg.get("models")
+            if not models_cfg:
+                raise ValueError("No 'models' are defined in cfg")
+            # get separate (non-shared) configuration and remove 'separate' key
+            try:
+                separate = models_cfg["separate"]
+                del models_cfg["separate"]
+            except KeyError:
+                separate = True
+                logger.warning("No 'separate' field defined in 'models' cfg. Defining it as True by default")
+            # non-shared models
+            if separate:
+                for role in models_cfg:
+                    # get instantiator function and remove 'class' key
+                    model_class = models_cfg[role].get("class")
+                    if not model_class:
+                        raise ValueError(f"No 'class' field defined in 'models:{role}' cfg")
+                    del models_cfg[role]["class"]
+                    model_class = self._component(model_class)
+                    num_obs = observations[agent_id][role]
+                    if self.empirical_normalization:
+                        obs_normalizer[agent_id][role] = EmpiricalNormalization(shape=[num_obs], until=1.0e8).to(device)
+                    else:
+                        obs_normalizer[agent_id][role] = torch.nn.Identity().to(device)  # no normalization
+                    # print obs_normalizer 
+                    print("==================================================")
+                    print(f"obs_normalizer for Agent_id {agent_id} --- Model (role): {role}")
+                    print("==================================================\n")
+                    print(obs_normalizer)
+                    print("--------------------------------------------------")
+            # shared models
+            else:
+                for role in models_cfg:
+                    try:
+                        if hasattr(role, 'policy'):
+                            # get instantiator function and remove 'class' key
+                            model_structure = models_cfg[role].get("class")
+                            if not model_structure:
+                                raise ValueError(f"No 'class' field defined in 'models:{role}' cfg")
+                            del models_cfg[role]["class"]
+                            model_class = self._component("Shared")
+                            num_obs = observations[agent_id][role]
+                            if self.empirical_normalization:
+                                obs_normalizer[agent_id][role] = EmpiricalNormalization(shape=[num_obs], until=1.0e8).to(device)
+                            else:
+                                obs_normalizer[agent_id][role] = torch.nn.Identity().to(device)  # no normalization
+                            # print obs_normalizer for shared models
+                            print("==================================================")
+                            print(f"obs_normalizer for Agent_id {agent_id} Shared model (roles): {role}")
+                            print("==================================================\n")
+                            print(obs_normalizer)
+                            print("--------------------------------------------------")
+                        else:
+                            pass
+                    except AttributeError:
+                        pass
+        return obs_normalizer
+    # end region normalizer
+    # ----------------------------------------------------------------
+    # ----------------------------------------------------------------
     # region NUM_OBS
     # TODO find a way to resolve the dimensions of observations
     # The idea is to make something similar to the method _generate_models because the models depend on the Observations dimensions
@@ -281,7 +370,7 @@ class Runner:
                             )
                     # print observation_space 
                     print("==================================================")
-                    print(f"Observation for Model (role): {role}")
+                    print(f"Observation for Agent_id {agent_id} --- Model (role): {role}")
                     print("==================================================\n")
                     print(observation_space) # Box(-inf, inf, (4,), float32)
                     print("--------------------------------------------------")
