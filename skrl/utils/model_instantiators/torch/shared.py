@@ -152,9 +152,12 @@ def shared_model(
     # network definitions
     networks_common = []
     forward_common = []
+    # Hooks definitions
+    hook_common = []
     for container in models[0]["containers"]:
         networks_common.append(f'self.{container["name"]}_container = {container["sequential"]}')
         forward_common.append(f'{container["name"]} = self.{container["name"]}_container({container["input"]})')
+        hook_common.append(f'{container["name"]} = self.{container["name"]}_container({container["input"]})')
     forward_common.insert(
         0, 'taken_actions = unflatten_tensorized_space(self.action_space, inputs.get("taken_actions"))'
     )
@@ -181,6 +184,7 @@ def shared_model(
 
     # build substitutions and indent content
     networks_common = textwrap.indent("\n".join(networks_common), prefix=" " * 8)[8:]
+    hook_common = textwrap.indent("\n".join(hook_common), prefix=" " * 8)[8:] # Hooks
     models[0]["networks"] = textwrap.indent("\n".join(models[0]["networks"]), prefix=" " * 8)[8:]
     extra = get_extra(structure[0], parameters[0], roles[0], models[0])
     if extra:
@@ -206,8 +210,10 @@ def shared_model(
         )
         forward_common.append(f'self._shared_output = {container["name"]}')
         forward_common = textwrap.indent("\n".join(forward_common), prefix=" " * 12)[12:]
+        # hook_common = textwrap.indent("\n".join(forward_common), prefix=" " * 12)[12:] # hooks
     else:
         forward_common = textwrap.indent("\n".join(forward_common), prefix=" " * 8)[8:]
+        # hook_common = textwrap.indent("\n".join(forward_common), prefix=" " * 8)[8:] # hooks
 
     models[0]["forward"] = textwrap.indent("\n".join(models[0]["forward"]), prefix=" " * 12)[12:]
     models[1]["forward"] = textwrap.indent("\n".join(models[1]["forward"]), prefix=" " * 12)[12:]
@@ -250,6 +256,24 @@ def shared_model(
             {models[1]["forward"]}
             return {get_return(structure[1])}
     """
+    # region Torch Hook
+    # roles[0] seems to be the policy and roles[1] seems to be value
+    # I am using object states because dont know how to properly change
+    if single_forward_pass:
+        template += f"""
+    def forward(self, states, role=""):
+        {hook_common}
+        {models[0]["forward"]}
+        return {get_return(structure[0])}
+    """
+    else:
+        template += f"""
+    def forward(self, states, role=""):
+        {hook_common}
+        {models[0]["forward"]}
+        return {get_return(structure[0])}
+    """
+    # end region
     # return source
     if return_source:
         return template

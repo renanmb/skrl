@@ -117,6 +117,9 @@ class MAPPO(MultiAgent):
             device=device,
             cfg=_cfg,
         )
+        # region RNN specs
+        # RNN specifications
+        self._rnn = False  # flag to indicate whether RNN is available
 
         self.shared_observation_spaces = shared_observation_spaces
 
