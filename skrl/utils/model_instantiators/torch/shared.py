@@ -157,7 +157,7 @@ def shared_model(
     for container in models[0]["containers"]:
         networks_common.append(f'self.{container["name"]}_container = {container["sequential"]}')
         forward_common.append(f'{container["name"]} = self.{container["name"]}_container({container["input"]})')
-        hook_common.append(f'{container["name"]} = self.{container["name"]}_container({container["input"]})')
+        hook_common.append(f'output = self.{container["name"]}_container(output)') # {container["name"]}  {container["input"]}
     forward_common.insert(
         0, 'taken_actions = unflatten_tensorized_space(self.action_space, inputs.get("taken_actions"))'
     )
@@ -258,17 +258,17 @@ def shared_model(
     """
     # region Torch Hook
     # roles[0] seems to be the policy and roles[1] seems to be value
-    # I am using object states because dont know how to properly change
+    # I am using object states because dont know how to properly change -- def forward(self, states, role=""):
     if single_forward_pass:
         template += f"""
-    def forward(self, states, role=""):
+    def forward(self, output):
         {hook_common}
         {models[0]["forward"]}
         return {get_return(structure[0])}
     """
     else:
         template += f"""
-    def forward(self, states, role=""):
+    def forward(self, output):
         {hook_common}
         {models[0]["forward"]}
         return {get_return(structure[0])}
