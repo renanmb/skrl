@@ -145,6 +145,7 @@ def shared_model(
     for i, model in enumerate(models):
         model["forward"] = []
         model["networks"] = []
+        model["hooks"] = [] # HOOKS - experiment
         model["containers"], model["output"] = generate_containers(
             parameters[i]["network"], parameters[i]["output"], embed_output=False, indent=1
         )
@@ -157,7 +158,7 @@ def shared_model(
     for container in models[0]["containers"]:
         networks_common.append(f'self.{container["name"]}_container = {container["sequential"]}')
         forward_common.append(f'{container["name"]} = self.{container["name"]}_container({container["input"]})')
-        hook_common.append(f'output = self.{container["name"]}_container(output)') # {container["name"]}  {container["input"]}
+        hook_common.append(f'x = self.{container["name"]}_container(x)') # {container["name"]}  {container["input"]}
     forward_common.insert(
         0, 'taken_actions = unflatten_tensorized_space(self.action_space, inputs.get("taken_actions"))'
     )
@@ -167,6 +168,7 @@ def shared_model(
     if models[0]["output"]["modules"]:
         models[0]["networks"].append(f'self.{roles[0]}_layer = {models[0]["output"]["modules"][0]}')
         models[0]["forward"].append(f'output = self.{roles[0]}_layer({container["name"]})')
+        models[0]["hooks"].append(f'x = self.{roles[0]}_layer(x)')
     if models[0]["output"]["output"]:
         models[0]["forward"].append(f'output = {models[0]["output"]["output"]}')
     else:
@@ -216,6 +218,7 @@ def shared_model(
         # hook_common = textwrap.indent("\n".join(forward_common), prefix=" " * 8)[8:] # hooks
 
     models[0]["forward"] = textwrap.indent("\n".join(models[0]["forward"]), prefix=" " * 12)[12:]
+    models[0]["hooks"] = textwrap.indent("\n".join(models[0]["hooks"]), prefix=" " * 12)[12:]
     models[1]["forward"] = textwrap.indent("\n".join(models[1]["forward"]), prefix=" " * 12)[12:]
 
     template = f"""class SharedModel({",".join(structure)}, Model):
@@ -261,17 +264,17 @@ def shared_model(
     # I am using object states because dont know how to properly change -- def forward(self, states, role=""):
     if single_forward_pass:
         template += f"""
-    def forward(self, output):
+    def forward(self, x):
         {hook_common}
-        {models[0]["forward"]}
-        return {get_return(structure[0])}
+        {models[0]["hooks"]}
+        return x
     """
     else:
         template += f"""
-    def forward(self, output):
+    def forward(self, x):
         {hook_common}
-        {models[0]["forward"]}
-        return {get_return(structure[0])}
+        {models[0]["hooks"]}
+        return x
     """
     # end region
     # return source

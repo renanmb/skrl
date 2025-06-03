@@ -39,7 +39,7 @@ class Runner:
 
         self._cfg["agent"]["rewards_shaper"] = None  # FIXME: avoid 'dictionary changed size during iteration'
 
-        self._models = self._generate_models(self._env, copy.deepcopy(self._cfg))
+        self._models, self._source = self._generate_models(self._env, copy.deepcopy(self._cfg))
         self._agent = self._generate_agent(self._env, copy.deepcopy(self._cfg), self._models)
         self._trainer = self._generate_trainer(self._env, copy.deepcopy(self._cfg), self._agent)
         
@@ -73,6 +73,12 @@ class Runner:
     def model(self) -> Model:
         """Model instance"""
         return self._models
+    
+    # this retuns the string Object with the -- class SharedModel(GaussianMixin,DeterministicMixin, Model):
+    @property
+    def source(self) -> Model:
+        """Model instance"""
+        return self._source
     
     @property
     def agent(self) -> Agent:
@@ -532,7 +538,7 @@ class Runner:
             for role, model in models[agent_id].items():
                 model.init_state_dict(role)
 
-        return models
+        return models, source
 
     def _generate_agent(
         self,
