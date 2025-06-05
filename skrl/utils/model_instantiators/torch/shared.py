@@ -190,11 +190,11 @@ def shared_model(
     models[0]["networks"] = textwrap.indent("\n".join(models[0]["networks"]), prefix=" " * 8)[8:]
     extra = get_extra(structure[0], parameters[0], roles[0], models[0])
     if extra:
-        models[0]["networks"] += "\n" + textwrap.indent(extra, prefix=" " * 8)
+        models[0]["networks"] += "\n" + textwrap.indent(extra, prefix=" " * 8) # this fixes the indentation self.log_std_parameter 
     models[1]["networks"] = textwrap.indent("\n".join(models[1]["networks"]), prefix=" " * 8)[8:]
     extra = get_extra(structure[1], parameters[1], roles[1], models[1])
     if extra:
-        models[1]["networks"] += "\n" + textwrap.indent(extra, prefix=" " * 8)
+        models[1]["networks"] += "\n" + textwrap.indent(extra, prefix=" " * 8) # this fixes the indentation self.log_std_parameter 
 
     if single_forward_pass:
         models[1]["forward"] = (
@@ -220,6 +220,12 @@ def shared_model(
     models[0]["forward"] = textwrap.indent("\n".join(models[0]["forward"]), prefix=" " * 12)[12:]
     models[0]["hooks"] = textwrap.indent("\n".join(models[0]["hooks"]), prefix=" " * 12)[12:]
     models[1]["forward"] = textwrap.indent("\n".join(models[1]["forward"]), prefix=" " * 12)[12:]
+    
+    # region Torch Hook
+    # roles[0] seems to be the policy and roles[1] seems to be value
+    # I am using object states because dont know how to properly change -- def forward(self, states, role=""):
+    # we can use the nn.Sequential Directly e.g.:
+    # self._nn = nn.Sequential(self.net_container, self.policy_layer) ---- This gives error as it is not defined in the load_state_dict  
 
     template = f"""class SharedModel({",".join(structure)}, Model):
     def __init__(self, observation_space, action_space, device):
@@ -259,24 +265,25 @@ def shared_model(
             {models[1]["forward"]}
             return {get_return(structure[1])}
     """
-    # region Torch Hook
-    # roles[0] seems to be the policy and roles[1] seems to be value
-    # I am using object states because dont know how to properly change -- def forward(self, states, role=""):
+
     if single_forward_pass:
         template += f"""
     def forward(self, x):
-        {hook_common}
-        {models[0]["hooks"]}
+        for name, module in self._modules.items():
+            x = module(x)
         return x
     """
     else:
         template += f"""
     def forward(self, x):
-        {hook_common}
-        {models[0]["hooks"]}
+        for name, module in self._modules.items():
+            x = module(x)
         return x
     """
+    # self._nn = MyModel(self)
+    # it should be x = self.net_container and x = self.policy_layer
     # end region
+
     # return source
     if return_source:
         return template
@@ -285,3 +292,9 @@ def shared_model(
     _locals = {}
     exec(template, globals(), _locals)
     return _locals["SharedModel"](observation_space=observation_space, action_space=action_space, device=device)
+
+# def forward(self, x):
+#     for name, module in self._modules.items():
+#         print(f"Passing through {name}: {module}")
+#         x = module(x)
+#     return x
