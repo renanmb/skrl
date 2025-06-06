@@ -145,7 +145,7 @@ def shared_model(
     for i, model in enumerate(models):
         model["forward"] = []
         model["networks"] = []
-        model["hooks"] = [] # HOOKS - experiment
+        model["hooks"] = [] # HOOKS - experiment # unnecessary
         model["containers"], model["output"] = generate_containers(
             parameters[i]["network"], parameters[i]["output"], embed_output=False, indent=1
         )
@@ -154,11 +154,11 @@ def shared_model(
     networks_common = []
     forward_common = []
     # Hooks definitions
-    hook_common = []
+    hook_common = [] # unnecessary
     for container in models[0]["containers"]:
         networks_common.append(f'self.{container["name"]}_container = {container["sequential"]}')
         forward_common.append(f'{container["name"]} = self.{container["name"]}_container({container["input"]})')
-        hook_common.append(f'x = self.{container["name"]}_container(x)') # {container["name"]}  {container["input"]}
+        hook_common.append(f'x = self.{container["name"]}_container(x)') # {container["name"]}  {container["input"]} # unnecessary
     forward_common.insert(
         0, 'taken_actions = unflatten_tensorized_space(self.action_space, inputs.get("taken_actions"))'
     )
@@ -168,7 +168,7 @@ def shared_model(
     if models[0]["output"]["modules"]:
         models[0]["networks"].append(f'self.{roles[0]}_layer = {models[0]["output"]["modules"][0]}')
         models[0]["forward"].append(f'output = self.{roles[0]}_layer({container["name"]})')
-        models[0]["hooks"].append(f'x = self.{roles[0]}_layer(x)')
+        models[0]["hooks"].append(f'x = self.{roles[0]}_layer(x)') # unnecessary
     if models[0]["output"]["output"]:
         models[0]["forward"].append(f'output = {models[0]["output"]["output"]}')
     else:
@@ -186,7 +186,7 @@ def shared_model(
 
     # build substitutions and indent content
     networks_common = textwrap.indent("\n".join(networks_common), prefix=" " * 8)[8:]
-    hook_common = textwrap.indent("\n".join(hook_common), prefix=" " * 8)[8:] # Hooks
+    hook_common = textwrap.indent("\n".join(hook_common), prefix=" " * 8)[8:] # Hooks # unnecessary
     models[0]["networks"] = textwrap.indent("\n".join(models[0]["networks"]), prefix=" " * 8)[8:]
     extra = get_extra(structure[0], parameters[0], roles[0], models[0])
     if extra:
@@ -218,7 +218,7 @@ def shared_model(
         # hook_common = textwrap.indent("\n".join(forward_common), prefix=" " * 8)[8:] # hooks
 
     models[0]["forward"] = textwrap.indent("\n".join(models[0]["forward"]), prefix=" " * 12)[12:]
-    models[0]["hooks"] = textwrap.indent("\n".join(models[0]["hooks"]), prefix=" " * 12)[12:]
+    models[0]["hooks"] = textwrap.indent("\n".join(models[0]["hooks"]), prefix=" " * 12)[12:] # unnecessary
     models[1]["forward"] = textwrap.indent("\n".join(models[1]["forward"]), prefix=" " * 12)[12:]
     
     # region Torch Hook
@@ -266,20 +266,6 @@ def shared_model(
             return {get_return(structure[1])}
     """
 
-    if single_forward_pass:
-        template += f"""
-    def forward(self, x):
-        for name, module in self._modules.items():
-            x = module(x)
-        return x
-    """
-    else:
-        template += f"""
-    def forward(self, x):
-        for name, module in self._modules.items():
-            x = module(x)
-        return x
-    """
     # self._nn = MyModel(self)
     # it should be x = self.net_container and x = self.policy_layer
     # end region
